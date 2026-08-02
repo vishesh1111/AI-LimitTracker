@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Claude amber accent -->
+    <color name="amber_700">#D97706</color>
+    <color name="amber_500">#F59E0B</color>
+
+    <!-- Dark theme base -->
+    <color name="surface_dark">#1A1A2E</color>
+    <color name="on_surface_dark">#E8E8F0</color>
+    <color name="background_dark">#0F0F1A</color>
+
+    <!-- Widget colors -->
+    <color name="widget_background">#E61A1A2E</color>
+    <color name="widget_text_primary">#E8E8F0</color>
+    <color name="widget_text_secondary">#9090A8</color>
+    <color name="widget_accent">#F59E0B</color>
+    <color name="widget_error">#EF4444</color>
+</resources>

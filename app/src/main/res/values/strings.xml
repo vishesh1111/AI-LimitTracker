@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Claude Tracker</string>
+    <string name="widget_description">Shows Claude.ai usage limits</string>
+</resources>
