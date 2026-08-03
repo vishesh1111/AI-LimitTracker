@@ -1,4 +1,4 @@
-# Claude Tracker
+# Claude Tracker For Android 
 
 A personal-use Android app that tracks your [Claude.ai](https://claude.ai) usage limits
 (session %, weekly %, reset times) by reading the same internal endpoint the claude.ai
@@ -253,3 +253,4 @@ ClaudeTracker/
 
 No `WAKE_LOCK`, no `BOOT_COMPLETED`, no `ACCESS_NETWORK_STATE`, no location,
 no camera, no storage access.
+<img width="706" height="1527" alt="PHOTO-2026-08-03-18-19-30" src="https://github.com/user-attachments/assets/4e30b1c6-ad6a-4634-9560-e3110003c66a" />
