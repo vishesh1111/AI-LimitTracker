@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.claudetracker.app.data.model.Account
+import com.claudetracker.app.data.model.Platform
 import org.json.JSONArray
 
 class SecureStorage(context: Context) {
@@ -20,9 +21,11 @@ class SecureStorage(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
 
+    // ── Account CRUD ────────────────────────────────────
+
     fun addAccount(account: Account) {
         val accounts = getAllAccounts().toMutableList()
-        val existingIndex = accounts.indexOfFirst { it.orgId == account.orgId }
+        val existingIndex = accounts.indexOfFirst { it.id == account.id }
         if (existingIndex >= 0) {
             accounts[existingIndex] = account
         } else {
@@ -31,8 +34,8 @@ class SecureStorage(context: Context) {
         saveAccounts(accounts)
     }
 
-    fun removeAccount(orgId: String) {
-        val accounts = getAllAccounts().filter { it.orgId != orgId }
+    fun removeAccount(accountId: String) {
+        val accounts = getAllAccounts().filter { it.id != accountId }
         saveAccounts(accounts)
     }
 
@@ -46,27 +49,68 @@ class SecureStorage(context: Context) {
         }
     }
 
+    fun getAccountsByPlatform(platform: Platform): List<Account> {
+        return getAllAccounts().filter { it.platform == platform }
+    }
+
+    // ── Token update helpers ────────────────────────────
+
+    /**
+     * Update the Codex access token after JWT refresh.
+     */
+    fun updateCodexAccessToken(accountId: String, newToken: String) {
+        val accounts = getAllAccounts().toMutableList()
+        val idx = accounts.indexOfFirst { it.id == accountId }
+        if (idx >= 0) {
+            accounts[idx] = accounts[idx].copy(codexAccessToken = newToken)
+            saveAccounts(accounts)
+        }
+    }
+
+    /**
+     * Update the Antigravity access token and expiry after OAuth refresh.
+     */
+    fun updateAntigravityToken(accountId: String, newToken: String, newExpiry: String) {
+        val accounts = getAllAccounts().toMutableList()
+        val idx = accounts.indexOfFirst { it.id == accountId }
+        if (idx >= 0) {
+            accounts[idx] = accounts[idx].copy(
+                agyAccessToken = newToken,
+                agyAccessTokenExpiry = newExpiry
+            )
+            saveAccounts(accounts)
+        }
+    }
+
+    // ── Private helpers ─────────────────────────────────
+
     private fun saveAccounts(accounts: List<Account>) {
         val array = JSONArray()
         accounts.forEach { array.put(it.toJson()) }
-        // Use commit() (synchronous) not apply() — prevents race condition where
-        // the status screen reads accounts before they are written to disk.
+        // Use commit() (synchronous) to prevent race conditions
         prefs.edit().putString(KEY_ACCOUNTS, array.toString()).commit()
-        android.util.Log.d("SecureStorage", "Saved ${accounts.size} accounts. Read-back: ${getAllAccounts().size}")
+        android.util.Log.d("SecureStorage", "Saved ${accounts.size} accounts")
     }
 
-    // Legacy compatibility — check if any account exists
+    // ── Legacy compatibility ────────────────────────────
+
     fun isLoggedIn(): Boolean = getAllAccounts().isNotEmpty()
 
-    // Legacy compatibility — get first account's cookie
     fun getCookie(): String? = getAllAccounts().firstOrNull()?.sessionCookie
 
-    // Legacy compatibility — get first account's org ID
     fun getOrgId(): String? = getAllAccounts().firstOrNull()?.orgId
 
-    // Legacy compatibility
     fun saveCookie(cookie: String, orgId: String) {
-        addAccount(Account(orgId = orgId, displayName = "Claude Account", sessionCookie = cookie, planName = "Unknown"))
+        addAccount(
+            Account(
+                id = orgId,
+                platform = Platform.CLAUDE,
+                orgId = orgId,
+                displayName = "Claude Account",
+                sessionCookie = cookie,
+                planName = "Unknown"
+            )
+        )
     }
 
     fun clearAll() {

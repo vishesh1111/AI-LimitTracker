@@ -5,6 +5,7 @@ import com.claudetracker.app.Config
 import com.claudetracker.app.data.local.SecureStorage
 import com.claudetracker.app.data.model.Account
 import com.claudetracker.app.data.model.AccountUsage
+import com.claudetracker.app.data.model.Platform
 import com.claudetracker.app.data.model.UsageData
 import com.claudetracker.app.data.model.UsageResult
 import com.claudetracker.app.data.remote.UsageApiClient
@@ -19,27 +20,93 @@ class UsageRepository(
 ) {
     private val widgetPrefs = context.getSharedPreferences(Config.WIDGET_PREFS_NAME, Context.MODE_PRIVATE)
 
+    // ── Multi-platform usage fetch ──────────────────────
+
+    /**
+     * Fetch usage for ALL accounts across all platforms, in parallel.
+     */
     suspend fun fetchAllUsage(): List<AccountUsage> = coroutineScope {
         val accounts = secureStorage.getAllAccounts()
         if (accounts.isEmpty()) return@coroutineScope emptyList()
 
         accounts.map { account ->
-            async {
-                when (val result = apiClient.fetchUsage(account.allCookies, account.orgId, account.planName)) {
-                    is UsageResult.Success -> AccountUsage(account = account, usageData = result.data)
-                    is UsageResult.AuthExpired -> AccountUsage(account = account, usageData = null, isAuthExpired = true)
-                    is UsageResult.NetworkError -> AccountUsage(account = account, usageData = null, error = result.message)
-                }
-            }
+            async { fetchSingleAccountUsage(account) }
         }.awaitAll()
     }
 
-    // Legacy single-account fetch for the background worker
+    /**
+     * Dispatch to the correct API based on the account's platform.
+     */
+    private suspend fun fetchSingleAccountUsage(account: Account): AccountUsage {
+        val result = when (account.platform) {
+            Platform.CLAUDE -> {
+                apiClient.fetchClaudeUsage(account.allCookies, account.orgId, account.planName)
+            }
+            Platform.CODEX -> {
+                fetchCodexWithTokenRefresh(account)
+            }
+            Platform.ANTIGRAVITY -> {
+                fetchAntigravityWithTokenRefresh(account)
+            }
+        }
+
+        return when (result) {
+            is UsageResult.Success -> AccountUsage(account = account, usageData = result.data)
+            is UsageResult.AuthExpired -> AccountUsage(account = account, usageData = null, isAuthExpired = true)
+            is UsageResult.NetworkError -> AccountUsage(account = account, usageData = null, error = result.message)
+        }
+    }
+
+    /**
+     * Codex: first refresh the JWT using the session cookie, then fetch usage.
+     */
+    private suspend fun fetchCodexWithTokenRefresh(account: Account): UsageResult {
+        // Step 1: Exchange session cookie for a fresh JWT
+        val tokenResult = apiClient.fetchCodexAccessToken(account.codexSessionCookie)
+        val accessToken = tokenResult.getOrElse {
+            return UsageResult.AuthExpired
+        }
+
+        // Update the stored token
+        secureStorage.updateCodexAccessToken(account.id, accessToken)
+
+        // Step 2: Fetch usage with the JWT
+        return apiClient.fetchCodexUsage(accessToken)
+    }
+
+    /**
+     * Antigravity: check if access token is expired, refresh if needed, then fetch usage.
+     */
+    private suspend fun fetchAntigravityWithTokenRefresh(account: Account): UsageResult {
+        var accessToken = account.agyAccessToken
+
+        // Check if token is expired or empty
+        val isExpired = accessToken.isBlank() || try {
+            val expiry = java.time.Instant.parse(account.agyAccessTokenExpiry)
+            java.time.Instant.now().isAfter(expiry.minusSeconds(60))
+        } catch (_: Exception) { true }
+
+        if (isExpired) {
+            val refreshResult = apiClient.refreshAntigravityToken(account.agyRefreshToken)
+            val (newToken, newExpiry) = refreshResult.getOrElse {
+                return UsageResult.AuthExpired
+            }
+            accessToken = newToken
+            secureStorage.updateAntigravityToken(account.id, newToken, newExpiry)
+        }
+
+        return apiClient.fetchAntigravityUsage(accessToken)
+    }
+
+    // ── Legacy single-account fetch (for backward compat) ──
+
     suspend fun fetchUsage(): UsageResult {
         val account = secureStorage.getAllAccounts().firstOrNull()
             ?: return UsageResult.AuthExpired
-        return apiClient.fetchUsage(account.allCookies, account.orgId, account.planName)
+        return apiClient.fetchClaudeUsage(account.allCookies, account.orgId, account.planName)
     }
+
+    // ── Widget cache ────────────────────────────────────
 
     fun getCachedUsage(): UsageData? {
         val sessionPercent = widgetPrefs.getFloat("session_percent", -1f)
@@ -65,6 +132,8 @@ class UsageRepository(
             .apply()
     }
 
+    // ── Reset timestamp tracking ────────────────────────
+
     fun getLastKnownResetTimestamp(key: String): String? {
         return widgetPrefs.getString(key, null)
     }
@@ -73,6 +142,8 @@ class UsageRepository(
         widgetPrefs.edit().putString(key, value).apply()
     }
 
+    // ── Auth management ─────────────────────────────────
+
     fun isLoggedIn(): Boolean = secureStorage.isLoggedIn()
 
     fun clearAuth() {
@@ -80,7 +151,7 @@ class UsageRepository(
         widgetPrefs.edit().clear().apply()
     }
 
-    fun removeAccount(orgId: String) {
-        secureStorage.removeAccount(orgId)
+    fun removeAccount(accountId: String) {
+        secureStorage.removeAccount(accountId)
     }
 }

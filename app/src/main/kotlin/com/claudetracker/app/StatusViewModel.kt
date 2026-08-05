@@ -72,28 +72,19 @@ class StatusViewModel : ViewModel() {
             try {
                 val accounts = repository.secureStorage.getAllAccounts()
                 Log.d("StatusViewModel", "Found ${accounts.size} accounts")
-                accounts.forEach {
-                    Log.d("StatusViewModel", "  Account: ${it.displayName}, plan=${it.planName}, orgId=${it.orgId}")
-                }
 
                 if (accounts.isEmpty()) {
-                    Log.d("StatusViewModel", "No accounts found, setting NoAccounts state")
                     _uiState.value = StatusState.NoAccounts
                     return@launch
                 }
 
-                Log.d("StatusViewModel", "Fetching usage for all accounts...")
                 val results = repository.fetchAllUsage()
                 Log.d("StatusViewModel", "Got ${results.size} results")
-                results.forEach { r ->
-                    Log.d("StatusViewModel", "  ${r.account.displayName}: data=${r.usageData}, error=${r.error}, authExpired=${r.isAuthExpired}")
-                    r.usageData?.let {
-                        Log.d("StatusViewModel", "    session=${it.sessionPercentUsed}%, weekly=${it.weeklyPercentUsed}%, plan=${it.planName}")
-                    }
-                }
 
-                // Cache the first account's data for the widget
-                results.firstOrNull()?.usageData?.let { repository.cacheUsage(it) }
+                // Cache the first successful account's data for the widget
+                results.firstOrNull { it.usageData != null }?.usageData?.let {
+                    repository.cacheUsage(it)
+                }
 
                 _uiState.value = StatusState.Loaded(
                     accounts = results,
@@ -107,11 +98,11 @@ class StatusViewModel : ViewModel() {
         }
     }
 
-    fun removeAccount(orgId: String) {
-        repository.removeAccount(orgId)
+    fun removeAccount(accountId: String) {
+        repository.removeAccount(accountId)
         val currentState = _uiState.value
         if (currentState is StatusState.Loaded) {
-            val remaining = currentState.accounts.filter { it.account.orgId != orgId }
+            val remaining = currentState.accounts.filter { it.account.id != accountId }
             if (remaining.isEmpty()) {
                 _uiState.value = StatusState.NoAccounts
             } else {

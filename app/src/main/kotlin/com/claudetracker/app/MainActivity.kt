@@ -30,7 +30,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             ClaudeTrackerTheme {
                 val isLoggedIn = ClaudeTrackerApp.appInstance.secureStorage.isLoggedIn()
-                val startDest = if (isLoggedIn) "status" else "login"
+                val startDest = if (isLoggedIn) "status" else "platform_picker"
                 AppNavigation(startDestination = startDest)
             }
         }

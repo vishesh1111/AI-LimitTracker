@@ -13,16 +13,23 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,15 +38,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.claudetracker.app.data.model.Platform
 
 private class OrgApiJsInterface(private val viewModel: LoginViewModel) {
     @JavascriptInterface
     fun onResult(status: Int, json: String) {
         Log.d("JSInterface", "onResult status=$status json=${json.take(100)}")
-        viewModel.onOrganizationsJson(status, json)
+        // Route to correct handler based on current platform
+        if (viewModel.targetPlatform == Platform.CODEX) {
+            viewModel.onCodexSessionJson(status, json)
+        } else {
+            viewModel.onOrganizationsJson(status, json)
+        }
     }
 
-    /** Called by the URL watcher when it detects navigation away from login pages */
     @JavascriptInterface
     fun onAuthenticated(url: String) {
         Log.d("JSInterface", "onAuthenticated: $url")
@@ -47,16 +59,8 @@ private class OrgApiJsInterface(private val viewModel: LoginViewModel) {
     }
 }
 
-/**
- * This JS is injected on EVERY claude.ai page load. It:
- * 1. Dismisses cookie consent banners
- * 2. Polls window.location.href every 500ms to detect SPA (pushState) navigation
- * 3. When a non-login URL is detected, calls AndroidOrg.onAuthenticated(url)
- *    which triggers the automatic org capture
- */
 private val WATCHER_JS = """
     (function() {
-        // --- Cookie banner dismissal ---
         function nuke() {
             document.body && (document.body.style.overflow='auto');
             ['[class*="cookie"],[class*="consent"],[id*="cookie"],[id*="consent"]',
@@ -69,17 +73,11 @@ private val WATCHER_JS = """
         }
         nuke(); setTimeout(nuke,800); setTimeout(nuke,2500);
 
-        // --- URL watcher for SPA navigation ---
-        if (window._ctUrlWatcherActive) return; // Don't install twice
+        if (window._ctUrlWatcherActive) return;
         window._ctUrlWatcherActive = true;
-        
-        var lastUrl = window.location.href;
-        console.log('[ClaudeTracker] URL watcher installed. Current URL: ' + lastUrl);
         
         function checkUrl() {
             var currentUrl = window.location.href;
-            
-            // Check if we're on an authenticated page (not login/oauth/signup)
             var isAuth = currentUrl.indexOf('claude.ai') !== -1
                 && currentUrl.indexOf('/login') === -1
                 && currentUrl.indexOf('/oauth') === -1
@@ -88,17 +86,12 @@ private val WATCHER_JS = """
                 && currentUrl.indexOf('/consent') === -1;
             
             if (isAuth && window.AndroidOrg) {
-                console.log('[ClaudeTracker] Authenticated URL detected: ' + currentUrl);
-                window._ctUrlWatcherActive = false; // Stop watching
+                window._ctUrlWatcherActive = false;
                 window.AndroidOrg.onAuthenticated(currentUrl);
-                return; // Stop polling
+                return;
             }
-            
-            // Keep polling
             setTimeout(checkUrl, 500);
         }
-        
-        // Start polling immediately
         checkUrl();
     })();
 """.trimIndent()
@@ -106,15 +99,17 @@ private val WATCHER_JS = """
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun LoginScreen(
+    platform: Platform = Platform.CLAUDE,
     clearAllCookies: Boolean = false,
     onLoginSuccess: () -> Unit,
     viewModel: LoginViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(platform) {
+        viewModel.targetPlatform = platform
         viewModel.clearWebViewCookies(clearAll = clearAllCookies)
-        if (!clearAllCookies) {
+        if (platform == Platform.CLAUDE && !clearAllCookies) {
             val cm = CookieManager.getInstance()
             cm.setCookie("https://claude.ai", "OptanonAlertBoxClosed=2024-01-01; Path=/; Domain=.claude.ai")
             cm.setCookie("https://claude.ai", "OptanonConsent=groups=C0001:1,C0002:1,C0003:1,C0004:1; Path=/; Domain=.claude.ai")
@@ -133,90 +128,163 @@ fun LoginScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Show WebView while waiting for login
-            if (uiState is LoginState.WaitingForLogin) {
-                AndroidView(
-                    factory = { context ->
-                        val container = android.widget.FrameLayout(context).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                        }
-                        val mainWebView = WebView(context).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.javaScriptCanOpenWindowsAutomatically = true
-                            settings.setSupportMultipleWindows(true)
-                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                            addJavascriptInterface(OrgApiJsInterface(viewModel), "AndroidOrg")
-                        }
+            when {
+                // ── WebView login for Claude and Codex ──
+                uiState is LoginState.WaitingForLogin && (platform == Platform.CLAUDE || platform == Platform.CODEX) -> {
+                    val loginUrl = when (platform) {
+                        Platform.CLAUDE -> "https://claude.ai/login"
+                        Platform.CODEX -> "https://chatgpt.com/auth/login"
+                        else -> ""
+                    }
 
-                        mainWebView.webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                viewModel.onUrlChanged(request?.url?.toString())
-                                return false
+                    AndroidView(
+                        factory = { context ->
+                            val container = android.widget.FrameLayout(context).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
                             }
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                Log.d("LoginScreen", "Page finished: $url")
-                                // Inject the URL watcher + cookie dismissal on EVERY page load
-                                // The watcher will poll for SPA navigation and auto-trigger capture
-                                view?.evaluateJavascript(WATCHER_JS, null)
-                                // Also notify ViewModel in case this page load IS the authenticated page
-                                viewModel.onPageFinished(url, view)
+                            val mainWebView = WebView(context).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.javaScriptCanOpenWindowsAutomatically = true
+                                settings.setSupportMultipleWindows(true)
+                                settings.userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                                // Add JS interface for both platforms
+                                addJavascriptInterface(OrgApiJsInterface(viewModel), "AndroidOrg")
                             }
-                        }
 
-                        mainWebView.webChromeClient = object : WebChromeClient() {
-                            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
-                                Log.d("LoginScreen", "onCreateWindow")
-                                val popup = WebView(context).apply {
-                                    settings.javaScriptEnabled = true
-                                    settings.domStorageEnabled = true
-                                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-                                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                            mainWebView.webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                    viewModel.onUrlChanged(request?.url?.toString())
+                                    return false
                                 }
-                                popup.webViewClient = object : WebViewClient() {
-                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                        val url = request?.url?.toString() ?: ""
-                                        if (url.contains("claude.ai")) {
-                                            mainWebView.loadUrl(url)
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    if (platform == Platform.CLAUDE) {
+                                        view?.evaluateJavascript(WATCHER_JS, null)
+                                    }
+                                    viewModel.onPageFinished(url, view)
+                                }
+                            }
+
+                            mainWebView.webChromeClient = object : WebChromeClient() {
+                                override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
+                                    val popup = WebView(context).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        settings.userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                        // Add the same JS interface to popup so captures work from here too
+                                        addJavascriptInterface(OrgApiJsInterface(viewModel), "AndroidOrg")
+                                    }
+                                    popup.webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                            val url = request?.url?.toString() ?: ""
+                                            val targetDomain = if (platform == Platform.CLAUDE) "claude.ai" else "chatgpt.com"
+                                            if (url.contains(targetDomain)) {
+                                                // Instead of loading the URL fresh in mainWebView (which loses auth context),
+                                                // let the popup handle it naturally — it has the cookies from the OAuth flow
+                                                return false
+                                            }
+                                            return false
+                                        }
+
+                                        override fun onPageFinished(view: WebView?, url: String?) {
+                                            super.onPageFinished(view, url)
+                                            if (url == null) return
+                                            val targetDomain = if (platform == Platform.CLAUDE) "claude.ai" else "chatgpt.com"
+                                            if (url.contains(targetDomain) &&
+                                                !url.contains("/login") &&
+                                                !url.contains("/oauth") &&
+                                                !url.contains("/signup") &&
+                                                !url.contains("/consent") &&
+                                                !url.contains("/verify") &&
+                                                !url.contains("/auth")) {
+                                                // OAuth completed in popup — close popup and load in main WebView
+                                                // The cookies are now set from the popup's natural OAuth flow
+                                                Log.d("LoginScreen", "OAuth done in popup, redirecting main WebView to: $url")
+                                                CookieManager.getInstance().flush()
+                                                mainWebView.loadUrl(url)
+                                                (popup.parent as? ViewGroup)?.removeView(popup)
+                                            }
+                                        }
+                                    }
+                                    popup.webChromeClient = object : WebChromeClient() {
+                                        override fun onCloseWindow(window: WebView?) {
                                             (popup.parent as? ViewGroup)?.removeView(popup)
-                                            return true
+                                        }
+                                    }
+                                    container.addView(popup)
+                                    val transport = resultMsg?.obj as? WebView.WebViewTransport
+                                    transport?.webView = popup
+                                    resultMsg?.sendToTarget()
+                                    return true
+                                }
+                            }
+
+                            CookieManager.getInstance().setAcceptCookie(true)
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(mainWebView, true)
+                            container.addView(mainWebView)
+                            mainWebView.loadUrl(loginUrl)
+                            container
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                // ── Google OAuth WebView for Antigravity (loopback redirect) ──
+                uiState is LoginState.WaitingForLogin && platform == Platform.ANTIGRAVITY -> {
+                    val oauthUrl = remember { viewModel.getAntigravityOAuthUrl() }
+
+                    AndroidView(
+                        factory = { context ->
+                            WebView(context).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+
+                                webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                        val url = request?.url?.toString() ?: return false
+                                        // Intercept the loopback redirect: http://127.0.0.1?code=XXX
+                                        if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
+                                            val uri = android.net.Uri.parse(url)
+                                            val code = uri.getQueryParameter("code")
+                                            if (!code.isNullOrBlank()) {
+                                                viewModel.onAntigravityAuthCode(code)
+                                            } else {
+                                                val error = uri.getQueryParameter("error")
+                                                Log.e("LoginScreen", "Antigravity OAuth error: $error")
+                                                viewModel.resetState()
+                                            }
+                                            return true // Don't navigate to 127.0.0.1
                                         }
                                         return false
                                     }
                                 }
-                                popup.webChromeClient = object : WebChromeClient() {
-                                    override fun onCloseWindow(window: WebView?) {
-                                        (popup.parent as? ViewGroup)?.removeView(popup)
-                                    }
-                                }
-                                container.addView(popup)
-                                val transport = resultMsg?.obj as? WebView.WebViewTransport
-                                transport?.webView = popup
-                                resultMsg?.sendToTarget()
-                                return true
-                            }
-                        }
 
-                        CookieManager.getInstance().setAcceptCookie(true)
-                        CookieManager.getInstance().setAcceptThirdPartyCookies(mainWebView, true)
-                        container.addView(mainWebView)
-                        mainWebView.loadUrl("https://claude.ai/login")
-                        container
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                                CookieManager.getInstance().setAcceptCookie(true)
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                loadUrl(oauthUrl)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
 
-            // Full-screen spinner while capturing/saving account
+            // Full-screen spinner while capturing/saving
             if (uiState is LoginState.CapturingCredentials || uiState is LoginState.Loading) {
                 Box(
                     modifier = Modifier
@@ -260,6 +328,56 @@ fun LoginScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AntigravityTokenInput(onSubmit: (String) -> Unit) {
+    var token by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Text(
+            "Antigravity Login",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            "Paste your Google OAuth refresh token below.\n\nYou can get this from your gcloud CLI:\nadb shell 'cat /data/data/com.google.android.gms/shared_prefs/*.xml' or from browser dev tools.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = token,
+            onValueChange = { token = it },
+            label = { Text("Refresh Token") },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 3,
+            maxLines = 5
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = { onSubmit(token.trim()) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = token.isNotBlank()
+        ) {
+            Text("Connect Account")
         }
     }
 }

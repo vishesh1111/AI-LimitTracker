@@ -1,17 +1,22 @@
 package com.claudetracker.app
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.claudetracker.app.data.model.Platform
 
 @Composable
 fun AppNavigation(startDestination: String) {
     val navController = rememberNavController()
+
     NavHost(navController = navController, startDestination = startDestination) {
+        // ── First-time Claude login (legacy entry point) ──
         composable("login") {
             LoginScreen(
-                clearAllCookies = false, // First login: just clear session cookie
+                platform = Platform.CLAUDE,
+                clearAllCookies = false,
                 onLoginSuccess = {
                     navController.navigate("status") {
                         popUpTo("login") { inclusive = true }
@@ -19,26 +24,47 @@ fun AppNavigation(startDestination: String) {
                 }
             )
         }
-        composable("add_account") {
+
+        // ── Platform picker — choose Claude / Codex / Antigravity ──
+        composable("platform_picker") {
+            PlatformPickerScreen(
+                onPlatformSelected = { platform ->
+                    navController.navigate("add_account/${platform.name}")
+                },
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        // ── Add account — login for a specific platform ──
+        composable("add_account/{platform}") { backStackEntry ->
+            val platformName = backStackEntry.arguments?.getString("platform") ?: "CLAUDE"
+            val platform = remember(platformName) {
+                try { Platform.valueOf(platformName) } catch (_: Exception) { Platform.CLAUDE }
+            }
+
             LoginScreen(
-                clearAllCookies = true, // Adding new account: clear ALL cookies for fresh login
+                platform = platform,
+                clearAllCookies = true,
                 onLoginSuccess = {
-                    // Go back to status after adding account
                     navController.navigate("status") {
                         popUpTo("status") { inclusive = false }
                     }
                 }
             )
         }
+
+        // ── Status dashboard ──
         composable("status") {
             StatusScreen(
                 onLogout = {
-                    navController.navigate("login") {
+                    navController.navigate("platform_picker") {
                         popUpTo("status") { inclusive = true }
                     }
                 },
                 onAddAccount = {
-                    navController.navigate("add_account")
+                    navController.navigate("platform_picker")
                 }
             )
         }

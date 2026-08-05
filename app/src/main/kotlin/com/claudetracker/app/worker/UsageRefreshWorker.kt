@@ -7,7 +7,8 @@ import androidx.work.WorkerParameters
 import com.claudetracker.app.ClaudeTrackerApp
 import com.claudetracker.app.Config
 import com.claudetracker.app.UsageGlanceWidget
-import com.claudetracker.app.data.model.UsageResult
+import com.claudetracker.app.data.model.AccountUsage
+import com.claudetracker.app.data.model.Platform
 import com.claudetracker.app.notification.NotificationHelper
 
 class UsageRefreshWorker(
@@ -20,42 +21,155 @@ class UsageRefreshWorker(
         val repository = app.usageRepository
         val notificationHelper = NotificationHelper(applicationContext)
 
-        return when (val result = repository.fetchUsage()) {
-            is UsageResult.Success -> {
-                val data = result.data
-                repository.cacheUsage(data)
+        return try {
+            val results = repository.fetchAllUsage()
 
-                // Reset detection: compare session reset timestamp against last known
-                val lastSessionReset = repository.getLastKnownResetTimestamp("last_session_reset")
-                if (lastSessionReset != null && lastSessionReset != data.sessionResetTimestamp) {
-                    notificationHelper.showResetNotification("session", data)
-                }
-                repository.saveLastKnownResetTimestamp("last_session_reset", data.sessionResetTimestamp)
-
-                // Reset detection: compare weekly reset timestamp against last known
-                val lastWeeklyReset = repository.getLastKnownResetTimestamp("last_weekly_reset")
-                if (lastWeeklyReset != null && lastWeeklyReset != data.weeklyResetTimestamp) {
-                    notificationHelper.showResetNotification("weekly", data)
-                }
-                repository.saveLastKnownResetTimestamp("last_weekly_reset", data.weeklyResetTimestamp)
-
-                // Update all widget instances
-                updateWidgets()
-
-                Result.success()
+            if (results.isEmpty()) {
+                return Result.success()
             }
-            is UsageResult.AuthExpired -> {
+
+            // Process each account's result for reset detection + notifications
+            for (accountUsage in results) {
+                processResetDetection(accountUsage, repository, notificationHelper)
+            }
+
+            // Cache the first successful account's data for the widget
+            results.firstOrNull { it.usageData != null }?.usageData?.let {
+                repository.cacheUsage(it)
+            }
+
+            // Mark auth_expired if ALL accounts are expired
+            val allExpired = results.all { it.isAuthExpired }
+            if (allExpired) {
                 val prefs = applicationContext.getSharedPreferences(
                     Config.WIDGET_PREFS_NAME, Context.MODE_PRIVATE
                 )
                 prefs.edit().putBoolean("auth_expired", true).apply()
-                updateWidgets()
-                // Return success — don't let WorkManager retry-storm an expired cookie
-                Result.success()
             }
-            is UsageResult.NetworkError -> {
-                Result.retry()
+
+            // Update all widget instances
+            updateWidgets()
+
+            Result.success()
+        } catch (e: Exception) {
+            android.util.Log.e("UsageRefreshWorker", "Unhandled error", e)
+            Result.retry()
+        }
+    }
+
+    /**
+     * Check for reset events on each account and fire notifications if needed.
+     * Uses strict timestamp comparison: only fires when newTimestamp > oldTimestamp.
+     */
+    private fun processResetDetection(
+        accountUsage: AccountUsage,
+        repository: com.claudetracker.app.data.UsageRepository,
+        notificationHelper: NotificationHelper
+    ) {
+        val data = accountUsage.usageData ?: return
+        val account = accountUsage.account
+        val accountId = account.id
+
+        // ── Standard session + weekly resets (Claude, Codex, Antigravity primary) ──
+        checkAndNotifyReset(
+            repository, notificationHelper,
+            key = "reset_${accountId}_session",
+            newTimestamp = data.sessionResetTimestamp,
+            platform = account.platform,
+            accountLabel = account.displayName,
+            windowType = "session",
+            currentPercent = data.sessionPercentUsed.toInt()
+        )
+
+        checkAndNotifyReset(
+            repository, notificationHelper,
+            key = "reset_${accountId}_weekly",
+            newTimestamp = data.weeklyResetTimestamp,
+            platform = account.platform,
+            accountLabel = account.displayName,
+            windowType = "weekly",
+            currentPercent = data.weeklyPercentUsed.toInt()
+        )
+
+        // ── Antigravity extra model group resets ──
+        if (data.hasModelGroups) {
+            data.geminiSession?.let {
+                checkAndNotifyReset(
+                    repository, notificationHelper,
+                    key = "reset_${accountId}_gemini_session",
+                    newTimestamp = it.resetsAt,
+                    platform = account.platform,
+                    accountLabel = account.displayName,
+                    windowType = "session",
+                    modelGroup = "Gemini",
+                    currentPercent = it.percentUsed.toInt()
+                )
             }
+            data.geminiWeekly?.let {
+                checkAndNotifyReset(
+                    repository, notificationHelper,
+                    key = "reset_${accountId}_gemini_weekly",
+                    newTimestamp = it.resetsAt,
+                    platform = account.platform,
+                    accountLabel = account.displayName,
+                    windowType = "weekly",
+                    modelGroup = "Gemini",
+                    currentPercent = it.percentUsed.toInt()
+                )
+            }
+            data.claudeGptSession?.let {
+                checkAndNotifyReset(
+                    repository, notificationHelper,
+                    key = "reset_${accountId}_claudegpt_session",
+                    newTimestamp = it.resetsAt,
+                    platform = account.platform,
+                    accountLabel = account.displayName,
+                    windowType = "session",
+                    modelGroup = "Claude/GPT",
+                    currentPercent = it.percentUsed.toInt()
+                )
+            }
+            data.claudeGptWeekly?.let {
+                checkAndNotifyReset(
+                    repository, notificationHelper,
+                    key = "reset_${accountId}_claudegpt_weekly",
+                    newTimestamp = it.resetsAt,
+                    platform = account.platform,
+                    accountLabel = account.displayName,
+                    windowType = "weekly",
+                    modelGroup = "Claude/GPT",
+                    currentPercent = it.percentUsed.toInt()
+                )
+            }
+        }
+    }
+
+    private fun checkAndNotifyReset(
+        repository: com.claudetracker.app.data.UsageRepository,
+        notificationHelper: NotificationHelper,
+        key: String,
+        newTimestamp: String,
+        platform: Platform,
+        accountLabel: String,
+        windowType: String,
+        modelGroup: String? = null,
+        currentPercent: Int = 0
+    ) {
+        val oldTimestamp = repository.getLastKnownResetTimestamp(key)
+
+        if (notificationHelper.hasResetOccurred(oldTimestamp, newTimestamp)) {
+            notificationHelper.showResetNotification(
+                platform = platform,
+                accountLabel = accountLabel,
+                windowType = windowType,
+                modelGroup = modelGroup,
+                currentPercent = currentPercent
+            )
+        }
+
+        // Always save the current timestamp
+        if (newTimestamp.isNotBlank()) {
+            repository.saveLastKnownResetTimestamp(key, newTimestamp)
         }
     }
 
@@ -68,7 +182,7 @@ class UsageRefreshWorker(
                 widget.update(applicationContext, id)
             }
         } catch (_: Exception) {
-            // Widget may not be placed on home screen — that's fine
+            // Widget may not be placed on home screen
         }
     }
 }
