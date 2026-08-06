@@ -216,4 +216,13 @@ ClaudeTracker/
 | `POST_NOTIFICATIONS` | Show reset notifications (Android 13+ requires runtime permission) |
 
 No `WAKE_LOCK`, no `BOOT_COMPLETED`, no `ACCESS_NETWORK_STATE`, no location, no camera, no storage access.
-<img width="706" height="1527" alt="PHOTO-2026-08-03-18-19-30" src="https://github.com/user-attachments/assets/4e30b1c6-ad6a-4634-9560-e3110003c66a" />
+
+---
+
+## Screenshots
+
+<div style="display: flex; flex-direction: row; gap: 10px;">
+  <img width="30%" alt="Screenshot 1" src="./assets/Screenshot_20260806_185425.png" />
+  <img width="30%" alt="Screenshot 2" src="./assets/Screenshot_20260806_185840.png" />
+  <img width="30%" alt="Screenshot 3" src="./assets/Screenshot_20260806_185858.png" />
+</div>
