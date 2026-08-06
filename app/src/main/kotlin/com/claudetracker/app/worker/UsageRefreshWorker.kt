@@ -70,7 +70,7 @@ class UsageRefreshWorker(
         val account = accountUsage.account
         val accountId = account.id
 
-        // ── Standard session + weekly resets (Claude, Codex, Antigravity primary) ──
+        // ── Standard session + weekly resets ──────────────────────────────
         checkAndNotifyReset(
             repository, notificationHelper,
             key = "reset_${accountId}_session",
@@ -91,57 +91,6 @@ class UsageRefreshWorker(
             currentPercent = data.weeklyPercentUsed.toInt()
         )
 
-        // ── Antigravity extra model group resets ──
-        if (data.hasModelGroups) {
-            data.geminiSession?.let {
-                checkAndNotifyReset(
-                    repository, notificationHelper,
-                    key = "reset_${accountId}_gemini_session",
-                    newTimestamp = it.resetsAt,
-                    platform = account.platform,
-                    accountLabel = account.displayName,
-                    windowType = "session",
-                    modelGroup = "Gemini",
-                    currentPercent = it.percentUsed.toInt()
-                )
-            }
-            data.geminiWeekly?.let {
-                checkAndNotifyReset(
-                    repository, notificationHelper,
-                    key = "reset_${accountId}_gemini_weekly",
-                    newTimestamp = it.resetsAt,
-                    platform = account.platform,
-                    accountLabel = account.displayName,
-                    windowType = "weekly",
-                    modelGroup = "Gemini",
-                    currentPercent = it.percentUsed.toInt()
-                )
-            }
-            data.claudeGptSession?.let {
-                checkAndNotifyReset(
-                    repository, notificationHelper,
-                    key = "reset_${accountId}_claudegpt_session",
-                    newTimestamp = it.resetsAt,
-                    platform = account.platform,
-                    accountLabel = account.displayName,
-                    windowType = "session",
-                    modelGroup = "Claude/GPT",
-                    currentPercent = it.percentUsed.toInt()
-                )
-            }
-            data.claudeGptWeekly?.let {
-                checkAndNotifyReset(
-                    repository, notificationHelper,
-                    key = "reset_${accountId}_claudegpt_weekly",
-                    newTimestamp = it.resetsAt,
-                    platform = account.platform,
-                    accountLabel = account.displayName,
-                    windowType = "weekly",
-                    modelGroup = "Claude/GPT",
-                    currentPercent = it.percentUsed.toInt()
-                )
-            }
-        }
     }
 
     private fun checkAndNotifyReset(

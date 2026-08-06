@@ -1,5 +1,19 @@
 package com.claudetracker.app
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.scale
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -70,26 +84,34 @@ fun PlatformPickerScreen(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            PlatformCard(
-                iconRes = R.drawable.ic_claude,
-                name = "Claude",
-                description = "Track your Claude.ai session & weekly usage limits",
-                onClick = { onPlatformSelected(Platform.CLAUDE) }
-            )
+            var isVisible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                isVisible = true
+            }
+            
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = fadeIn(tween(400)) + slideInVertically(tween(400), initialOffsetY = { 50 })
+            ) {
+                PlatformCard(
+                    iconRes = R.drawable.ic_claude,
+                    name = "Claude",
+                    description = "Track your Claude.ai session & weekly usage limits",
+                    onClick = { onPlatformSelected(Platform.CLAUDE) }
+                )
+            }
 
-            PlatformCard(
-                iconRes = R.drawable.ic_codex,
-                name = "Codex (ChatGPT)",
-                description = "Track your ChatGPT Plus/Pro usage limits",
-                onClick = { onPlatformSelected(Platform.CODEX) }
-            )
-
-            PlatformCard(
-                iconRes = R.drawable.ic_antigravity,
-                name = "Antigravity",
-                description = "Track Gemini & Claude/GPT model limits in Antigravity",
-                onClick = { onPlatformSelected(Platform.ANTIGRAVITY) }
-            )
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = fadeIn(tween(600)) + slideInVertically(tween(600), initialOffsetY = { 50 })
+            ) {
+                PlatformCard(
+                    iconRes = R.drawable.ic_codex,
+                    name = "Codex (ChatGPT)",
+                    description = "Track your ChatGPT Plus/Pro usage limits",
+                    onClick = { onPlatformSelected(Platform.CODEX) }
+                )
+            }
         }
     }
 }
@@ -101,14 +123,28 @@ private fun PlatformCard(
     description: String,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.95f else 1f,
+        animationSpec = tween(durationMillis = 150),
+        label = "press_scale"
+    )
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .scale(scale)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.foundation.LocalIndication.current,
+                onClick = onClick
+            ),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier

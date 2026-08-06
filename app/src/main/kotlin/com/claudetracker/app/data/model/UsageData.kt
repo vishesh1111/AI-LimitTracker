@@ -14,21 +14,13 @@ data class UsageWindow(
  * Usage data for any platform.
  *
  * For Claude & Codex: [sessionPercentUsed] / [weeklyPercentUsed] are the primary values.
- * For Antigravity:  the four optional [geminiSession], [geminiWeekly], [claudeGptSession],
- * [claudeGptWeekly] windows carry per-model-group data, and [hasModelGroups] is true.
  */
 data class UsageData(
     val sessionPercentUsed: Double,
     val weeklyPercentUsed: Double,
     val sessionResetTimestamp: String,
     val weeklyResetTimestamp: String,
-    val planName: String,
-    // ── Antigravity dual model groups ──
-    val geminiSession: UsageWindow? = null,
-    val geminiWeekly: UsageWindow? = null,
-    val claudeGptSession: UsageWindow? = null,
-    val claudeGptWeekly: UsageWindow? = null,
-    val hasModelGroups: Boolean = false
+    val planName: String
 ) {
     companion object {
         /**
@@ -94,8 +86,16 @@ data class UsageData(
             val weeklyResetSecs = secondary?.optLong("reset_after_seconds", 0L) ?: 0L
 
             val now = System.currentTimeMillis()
-            val sessionResetIso = java.time.Instant.ofEpochMilli(now + sessionResetSecs * 1000).toString()
-            val weeklyResetIso = java.time.Instant.ofEpochMilli(now + weeklyResetSecs * 1000).toString()
+            // Round to the nearest minute to prevent jitter — each refresh recalculates
+            // "now + remaining_seconds" which would give a different result every time.
+            // Rounding means two refreshes 15 min apart both saying "resets in 2h"
+            // produce the same timestamp, preventing spurious notifications.
+            val sessionResetMs = now + sessionResetSecs * 1000
+            val weeklyResetMs = now + weeklyResetSecs * 1000
+            val roundedSessionMs = (sessionResetMs / 60_000L) * 60_000L
+            val roundedWeeklyMs = (weeklyResetMs / 60_000L) * 60_000L
+            val sessionResetIso = java.time.Instant.ofEpochMilli(roundedSessionMs).toString()
+            val weeklyResetIso = java.time.Instant.ofEpochMilli(roundedWeeklyMs).toString()
 
             return UsageData(
                 sessionPercentUsed = sessionPercent,
@@ -103,63 +103,6 @@ data class UsageData(
                 sessionResetTimestamp = sessionResetIso,
                 weeklyResetTimestamp = weeklyResetIso,
                 planName = planType
-            )
-        }
-
-        /**
-         * Parse Antigravity (Google Cloud Code) usage response.
-         * Groups model configs into Gemini models vs Claude/GPT models.
-         * For each group, picks the model with the highest usage (lowest remainingFraction).
-         */
-        fun fromAntigravityJson(json: JSONObject): UsageData {
-            android.util.Log.d("UsageData", "Parsing Antigravity JSON: ${json.toString().take(600)}")
-
-            val modelConfigs = json.optJSONArray("modelConfigs")
-            val weeklyModelConfigs = json.optJSONArray("weeklyModelConfigs")
-
-            data class ModelQuota(val label: String, val modelId: String, val percentUsed: Double, val resetTime: String)
-
-            fun parseConfigs(configs: org.json.JSONArray?): List<ModelQuota> {
-                if (configs == null) return emptyList()
-                return (0 until configs.length()).mapNotNull { i ->
-                    val cfg = configs.optJSONObject(i) ?: return@mapNotNull null
-                    val label = cfg.optString("label", "")
-                    val modelObj = cfg.optJSONObject("modelOrAlias")
-                    val modelId = modelObj?.optString("model", label) ?: label
-                    val quota = cfg.optJSONObject("quotaInfo")
-                    val remaining = quota?.optDouble("remainingFraction", 1.0) ?: 1.0
-                    val resetTime = quota?.optString("resetTime", "") ?: ""
-                    ModelQuota(label, modelId, (1.0 - remaining) * 100.0, resetTime)
-                }
-            }
-
-            val sessionModels = parseConfigs(modelConfigs)
-            val weeklyModels = parseConfigs(weeklyModelConfigs)
-
-            fun isGemini(id: String) = id.contains("gemini", ignoreCase = true)
-            fun isClaudeGpt(id: String) = id.contains("claude", ignoreCase = true) || id.contains("gpt", ignoreCase = true)
-
-            // Find worst-case (highest usage) model per group
-            val geminiSessionWorst = sessionModels.filter { isGemini(it.modelId) }.maxByOrNull { it.percentUsed }
-            val geminiWeeklyWorst = weeklyModels.filter { isGemini(it.modelId) }.maxByOrNull { it.percentUsed }
-            val claudeGptSessionWorst = sessionModels.filter { isClaudeGpt(it.modelId) }.maxByOrNull { it.percentUsed }
-            val claudeGptWeeklyWorst = weeklyModels.filter { isClaudeGpt(it.modelId) }.maxByOrNull { it.percentUsed }
-
-            // Primary values = Gemini worst-case (or overall if no separation)
-            val primarySession = geminiSessionWorst ?: sessionModels.maxByOrNull { it.percentUsed }
-            val primaryWeekly = geminiWeeklyWorst ?: weeklyModels.maxByOrNull { it.percentUsed }
-
-            return UsageData(
-                sessionPercentUsed = primarySession?.percentUsed ?: 0.0,
-                weeklyPercentUsed = primaryWeekly?.percentUsed ?: 0.0,
-                sessionResetTimestamp = primarySession?.resetTime ?: "",
-                weeklyResetTimestamp = primaryWeekly?.resetTime ?: "",
-                planName = "Antigravity",
-                geminiSession = geminiSessionWorst?.let { UsageWindow(it.percentUsed, it.resetTime) },
-                geminiWeekly = geminiWeeklyWorst?.let { UsageWindow(it.percentUsed, it.resetTime) },
-                claudeGptSession = claudeGptSessionWorst?.let { UsageWindow(it.percentUsed, it.resetTime) },
-                claudeGptWeekly = claudeGptWeeklyWorst?.let { UsageWindow(it.percentUsed, it.resetTime) },
-                hasModelGroups = geminiSessionWorst != null || claudeGptSessionWorst != null
             )
         }
 

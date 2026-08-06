@@ -16,31 +16,35 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 private val LightColors = lightColorScheme(
-    primary = md_theme_light_primary,
-    onPrimary = md_theme_light_onPrimary,
-    primaryContainer = md_theme_light_primaryContainer,
-    onPrimaryContainer = md_theme_light_onPrimaryContainer,
-    background = md_theme_light_background,
-    onBackground = md_theme_light_onBackground,
-    surface = md_theme_light_surface,
-    onSurface = md_theme_light_onSurface,
+    primary = premium_light_primary,
+    onPrimary = premium_light_onPrimary,
+    primaryContainer = premium_light_primaryContainer,
+    onPrimaryContainer = premium_light_onPrimaryContainer,
+    background = premium_light_background,
+    onBackground = premium_light_onBackground,
+    surface = premium_light_surface,
+    onSurface = premium_light_onSurface,
+    surfaceVariant = premium_light_surfaceVariant,
+    onSurfaceVariant = premium_light_onSurfaceVariant,
 )
 
 private val DarkColors = darkColorScheme(
-    primary = md_theme_dark_primary,
-    onPrimary = md_theme_dark_onPrimary,
-    primaryContainer = md_theme_dark_primaryContainer,
-    onPrimaryContainer = md_theme_dark_onPrimaryContainer,
-    background = md_theme_dark_background,
-    onBackground = md_theme_dark_onBackground,
-    surface = md_theme_dark_surface,
-    onSurface = md_theme_dark_onSurface,
+    primary = premium_dark_primary,
+    onPrimary = premium_dark_onPrimary,
+    primaryContainer = premium_dark_primaryContainer,
+    onPrimaryContainer = premium_dark_onPrimaryContainer,
+    background = premium_dark_background,
+    onBackground = premium_dark_onBackground,
+    surface = premium_dark_surface,
+    onSurface = premium_dark_onSurface,
+    surfaceVariant = premium_dark_surfaceVariant,
+    onSurfaceVariant = premium_dark_onSurfaceVariant,
 )
 
 @Composable
 fun ClaudeTrackerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false, // Force premium colors
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {

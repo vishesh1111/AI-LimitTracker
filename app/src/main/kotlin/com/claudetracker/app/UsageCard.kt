@@ -1,5 +1,8 @@
 package com.claudetracker.app
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +15,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -28,10 +36,29 @@ fun UsageCard(
     color: Color,
     modifier: Modifier = Modifier
 ) {
+    var animationPlayed by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(key1 = true) {
+        animationPlayed = true
+    }
+
+    val animatedSweepAngle by animateFloatAsState(
+        targetValue = if (animationPlayed) (percent * 360 / 100).toFloat() else 0f,
+        animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+        label = "sweepAngle"
+    )
+
+    val animatedPercent by animateFloatAsState(
+        targetValue = if (animationPlayed) percent.toFloat() else 0f,
+        animationSpec = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+        label = "percent"
+    )
+
     Surface(
         modifier = modifier.padding(8.dp),
-        shape = MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceVariant,
+        shadowElevation = 2.dp
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -49,13 +76,13 @@ fun UsageCard(
                     drawArc(
                         color = color,
                         startAngle = -90f,
-                        sweepAngle = (percent * 360 / 100).toFloat(),
+                        sweepAngle = animatedSweepAngle,
                         useCenter = false,
                         style = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Round)
                     )
                 }
                 Text(
-                    text = "${percent.toInt()}%",
+                    text = "${animatedPercent.toInt()}%",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

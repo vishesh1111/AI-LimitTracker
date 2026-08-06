@@ -86,7 +86,6 @@ class LoginViewModel : ViewModel() {
         when (targetPlatform) {
             Platform.CLAUDE -> handleClaudePageFinished(url, webView)
             Platform.CODEX -> handleCodexPageFinished(url, webView)
-            Platform.ANTIGRAVITY -> { /* Antigravity uses manual token input, not WebView */ }
         }
     }
 
@@ -401,131 +400,6 @@ class LoginViewModel : ViewModel() {
         ClaudeTrackerApp.appInstance.secureStorage.addAccount(account)
         hasCaptured = true
         _uiState.value = LoginState.Success
-    }
-
-    // ═══════════════════════════════════════════════════
-    // ── Antigravity login flow (Google OAuth WebView) ─
-    // ═══════════════════════════════════════════════════
-
-    /**
-     * Build the Google OAuth URL using gcloud's installed-app client.
-     * Uses the OOB (out-of-band) redirect which shows the auth code
-     * on a Google page after the user approves — no localhost redirect needed.
-     */
-    fun getAntigravityOAuthUrl(): String {
-        val scopes = listOf(
-            "openid",
-            "https://www.googleapis.com/auth/userinfo.email",
-            "https://www.googleapis.com/auth/cloud-platform"
-        ).joinToString(" ")
-
-        return "https://accounts.google.com/o/oauth2/v2/auth?" +
-            "client_id=${Config.AGY_CLIENT_ID}" +
-            "&redirect_uri=${java.net.URLEncoder.encode(Config.AGY_REDIRECT_URI, "UTF-8")}" +
-            "&response_type=code" +
-            "&scope=${java.net.URLEncoder.encode(scopes, "UTF-8")}" +
-            "&access_type=offline" +
-            "&prompt=consent"
-    }
-
-    /**
-     * Called when the OAuth WebView's page title or body contains the auth code.
-     * Google's OOB flow shows the code on the final page as the page title.
-     */
-    fun onAntigravityAuthCode(code: String) {
-        if (hasCaptured || _uiState.value is LoginState.Success) return
-        Log.d("LoginViewModel", "Got Antigravity auth code: ${code.take(20)}...")
-
-        _uiState.value = LoginState.CapturingCredentials
-        captureJob?.cancel()
-        captureJob = viewModelScope.launch {
-            try {
-                val apiClient = ClaudeTrackerApp.appInstance.usageApiClient
-                val tokenResult = apiClient.exchangeAntigravityCode(code)
-                val triple = tokenResult.getOrElse {
-                    _uiState.value = LoginState.Error("Token exchange failed: ${it.message}")
-                    return@launch
-                }
-                val (accessToken, refreshToken, expiry) = triple
-                val email = fetchGoogleEmail(accessToken) ?: "Google Account"
-
-                val accountId = "agy_${System.currentTimeMillis().toString(36)}"
-                val account = Account(
-                    id = accountId,
-                    platform = Platform.ANTIGRAVITY,
-                    displayName = email,
-                    planName = "Antigravity",
-                    agyRefreshToken = refreshToken,
-                    agyAccessToken = accessToken,
-                    agyAccessTokenExpiry = expiry
-                )
-                ClaudeTrackerApp.appInstance.secureStorage.addAccount(account)
-                hasCaptured = true
-                _uiState.value = LoginState.Success
-            } catch (e: Exception) {
-                Log.e("LoginViewModel", "Antigravity auth error", e)
-                _uiState.value = LoginState.Error("Error: ${e.message}")
-            }
-        }
-    }
-
-    /** Kept for backward-compat; not used in the new flow. */
-    fun onAntigravityImplicitToken(accessToken: String, expiresIn: Long) {
-        onAntigravityAuthCode("__implicit__$accessToken")
-    }
-
-    /**
-     * Also keep manual token paste as a fallback.
-     */
-    fun submitAntigravityRefreshToken(refreshToken: String) {
-        if (refreshToken.isBlank()) {
-            _uiState.value = LoginState.Error("Refresh token is empty")
-            return
-        }
-
-        _uiState.value = LoginState.CapturingCredentials
-        captureJob?.cancel()
-        captureJob = viewModelScope.launch {
-            try {
-                val apiClient = ClaudeTrackerApp.appInstance.usageApiClient
-                val tokenResult = apiClient.refreshAntigravityToken(refreshToken)
-                val (accessToken, expiry) = tokenResult.getOrElse {
-                    _uiState.value = LoginState.Error("Invalid refresh token: ${it.message}")
-                    return@launch
-                }
-
-                val accountId = "agy_${System.currentTimeMillis().toString(36)}"
-                val account = Account(
-                    id = accountId,
-                    platform = Platform.ANTIGRAVITY,
-                    displayName = "Antigravity",
-                    planName = "Antigravity",
-                    agyRefreshToken = refreshToken,
-                    agyAccessToken = accessToken,
-                    agyAccessTokenExpiry = expiry
-                )
-
-                ClaudeTrackerApp.appInstance.secureStorage.addAccount(account)
-                hasCaptured = true
-                _uiState.value = LoginState.Success
-            } catch (e: Exception) {
-                _uiState.value = LoginState.Error("Error: ${e.message}")
-            }
-        }
-    }
-
-    private suspend fun fetchGoogleEmail(accessToken: String): String? {
-        return withContext(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                val request = okhttp3.Request.Builder()
-                    .url("https://www.googleapis.com/oauth2/v2/userinfo")
-                    .addHeader("Authorization", "Bearer $accessToken")
-                    .build()
-                val response = ClaudeTrackerApp.appInstance.okHttpClient.newCall(request).execute()
-                val body = response.body?.string() ?: return@withContext null
-                JSONObject(body).optString("email", null)
-            } catch (_: Exception) { null }
-        }
     }
 
     // ═══════════════════════════════════════════════════

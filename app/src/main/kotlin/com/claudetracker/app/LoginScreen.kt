@@ -10,6 +10,9 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,15 +24,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -239,61 +241,22 @@ fun LoginScreen(
                     )
                 }
 
-                // ── Google OAuth WebView for Antigravity (loopback redirect) ──
-                uiState is LoginState.WaitingForLogin && platform == Platform.ANTIGRAVITY -> {
-                    val oauthUrl = remember { viewModel.getAntigravityOAuthUrl() }
-
-                    AndroidView(
-                        factory = { context ->
-                            WebView(context).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-
-                                webViewClient = object : WebViewClient() {
-                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                        val url = request?.url?.toString() ?: return false
-                                        // Intercept the loopback redirect: http://127.0.0.1?code=XXX
-                                        if (url.startsWith("http://127.0.0.1") || url.startsWith("http://localhost")) {
-                                            val uri = android.net.Uri.parse(url)
-                                            val code = uri.getQueryParameter("code")
-                                            if (!code.isNullOrBlank()) {
-                                                viewModel.onAntigravityAuthCode(code)
-                                            } else {
-                                                val error = uri.getQueryParameter("error")
-                                                Log.e("LoginScreen", "Antigravity OAuth error: $error")
-                                                viewModel.resetState()
-                                            }
-                                            return true // Don't navigate to 127.0.0.1
-                                        }
-                                        return false
-                                    }
-                                }
-
-                                CookieManager.getInstance().setAcceptCookie(true)
-                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                                loadUrl(oauthUrl)
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
             }
 
             // Full-screen spinner while capturing/saving
-            if (uiState is LoginState.CapturingCredentials || uiState is LoginState.Loading) {
+            AnimatedVisibility(
+                visible = uiState is LoginState.CapturingCredentials || uiState is LoginState.Loading,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF121218)),
+                        .background(Color.Black.copy(alpha = 0.8f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Color(0xFF90CAF9))
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                         Text(
                             "Saving your account...",
                             modifier = Modifier.padding(top = 16.dp),
@@ -305,11 +268,15 @@ fun LoginScreen(
             }
 
             // Error screen
-            if (uiState is LoginState.Error) {
+            AnimatedVisibility(
+                visible = uiState is LoginState.Error,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.errorContainer),
+                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
@@ -328,56 +295,6 @@ fun LoginScreen(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun AntigravityTokenInput(onSubmit: (String) -> Unit) {
-    var token by remember { mutableStateOf("") }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(modifier = Modifier.height(48.dp))
-
-        Text(
-            "Antigravity Login",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            "Paste your Google OAuth refresh token below.\n\nYou can get this from your gcloud CLI:\nadb shell 'cat /data/data/com.google.android.gms/shared_prefs/*.xml' or from browser dev tools.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = token,
-            onValueChange = { token = it },
-            label = { Text("Refresh Token") },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 3,
-            maxLines = 5
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = { onSubmit(token.trim()) },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = token.isNotBlank()
-        ) {
-            Text("Connect Account")
         }
     }
 }

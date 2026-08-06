@@ -4,13 +4,12 @@ import org.json.JSONObject
 
 /** Supported platforms in the tracker. */
 enum class Platform {
-    CLAUDE, CODEX, ANTIGRAVITY;
+    CLAUDE, CODEX;
 
     val displayName: String
         get() = when (this) {
             CLAUDE -> "Claude"
             CODEX -> "Codex (ChatGPT)"
-            ANTIGRAVITY -> "Antigravity"
         }
 }
 
@@ -29,11 +28,7 @@ data class Account(
     val orgId: String = "",
     // ── Codex-specific ──
     val codexSessionCookie: String = "", // __Secure-next-auth.session-token
-    val codexAccessToken: String = "",   // JWT bearer token
-    // ── Antigravity-specific ──
-    val agyRefreshToken: String = "",
-    val agyAccessToken: String = "",
-    val agyAccessTokenExpiry: String = ""
+    val codexAccessToken: String = ""    // JWT bearer token
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -46,20 +41,14 @@ data class Account(
             put("allCookies", allCookies)
             put("codexSessionCookie", codexSessionCookie)
             put("codexAccessToken", codexAccessToken)
-            put("agyRefreshToken", agyRefreshToken)
-            put("agyAccessToken", agyAccessToken)
-            put("agyAccessTokenExpiry", agyAccessTokenExpiry)
         }
     }
 
     companion object {
-        fun fromJson(json: JSONObject): Account {
+        fun fromJson(json: JSONObject): Account? {
             val platformStr = json.optString("platform", "CLAUDE")
-            val platform = try {
-                Platform.valueOf(platformStr)
-            } catch (_: Exception) {
-                Platform.CLAUDE
-            }
+            val platform = runCatching { Platform.valueOf(platformStr) }.getOrNull()
+                ?: return null
 
             val sessionCookie = json.optString("sessionCookie", "")
             // Legacy accounts don't have "id" — fall back to orgId
@@ -74,10 +63,7 @@ data class Account(
                 allCookies = json.optString("allCookies", sessionCookie),
                 orgId = json.optString("orgId", ""),
                 codexSessionCookie = json.optString("codexSessionCookie", ""),
-                codexAccessToken = json.optString("codexAccessToken", ""),
-                agyRefreshToken = json.optString("agyRefreshToken", ""),
-                agyAccessToken = json.optString("agyAccessToken", ""),
-                agyAccessTokenExpiry = json.optString("agyAccessTokenExpiry", "")
+                codexAccessToken = json.optString("codexAccessToken", "")
             )
         }
     }

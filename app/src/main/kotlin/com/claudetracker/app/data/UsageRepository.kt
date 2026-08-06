@@ -45,9 +45,6 @@ class UsageRepository(
             Platform.CODEX -> {
                 fetchCodexWithTokenRefresh(account)
             }
-            Platform.ANTIGRAVITY -> {
-                fetchAntigravityWithTokenRefresh(account)
-            }
         }
 
         return when (result) {
@@ -72,30 +69,6 @@ class UsageRepository(
 
         // Step 2: Fetch usage with the JWT
         return apiClient.fetchCodexUsage(accessToken)
-    }
-
-    /**
-     * Antigravity: check if access token is expired, refresh if needed, then fetch usage.
-     */
-    private suspend fun fetchAntigravityWithTokenRefresh(account: Account): UsageResult {
-        var accessToken = account.agyAccessToken
-
-        // Check if token is expired or empty
-        val isExpired = accessToken.isBlank() || try {
-            val expiry = java.time.Instant.parse(account.agyAccessTokenExpiry)
-            java.time.Instant.now().isAfter(expiry.minusSeconds(60))
-        } catch (_: Exception) { true }
-
-        if (isExpired) {
-            val refreshResult = apiClient.refreshAntigravityToken(account.agyRefreshToken)
-            val (newToken, newExpiry) = refreshResult.getOrElse {
-                return UsageResult.AuthExpired
-            }
-            accessToken = newToken
-            secureStorage.updateAntigravityToken(account.id, newToken, newExpiry)
-        }
-
-        return apiClient.fetchAntigravityUsage(accessToken)
     }
 
     // ── Legacy single-account fetch (for backward compat) ──

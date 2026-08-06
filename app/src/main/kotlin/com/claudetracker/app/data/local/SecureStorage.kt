@@ -25,9 +25,17 @@ class SecureStorage(context: Context) {
 
     fun addAccount(account: Account) {
         val accounts = getAllAccounts().toMutableList()
-        val existingIndex = accounts.indexOfFirst { it.id == account.id }
+        // Codex accounts have generated IDs, so keep one current account.
+        val existingIndex = when (account.platform) {
+            Platform.CODEX -> accounts.indexOfFirst {
+                it.platform == Platform.CODEX
+            }
+            else -> accounts.indexOfFirst { it.id == account.id }
+        }
         if (existingIndex >= 0) {
-            accounts[existingIndex] = account
+            // Preserve original ID but update credentials
+            val existingId = accounts[existingIndex].id
+            accounts[existingIndex] = account.copy(id = existingId)
         } else {
             accounts.add(account)
         }
@@ -43,7 +51,7 @@ class SecureStorage(context: Context) {
         val json = prefs.getString(KEY_ACCOUNTS, null) ?: return emptyList()
         return try {
             val array = JSONArray(json)
-            (0 until array.length()).map { Account.fromJson(array.getJSONObject(it)) }
+            (0 until array.length()).mapNotNull { Account.fromJson(array.getJSONObject(it)) }
         } catch (_: Exception) {
             emptyList()
         }
@@ -63,21 +71,6 @@ class SecureStorage(context: Context) {
         val idx = accounts.indexOfFirst { it.id == accountId }
         if (idx >= 0) {
             accounts[idx] = accounts[idx].copy(codexAccessToken = newToken)
-            saveAccounts(accounts)
-        }
-    }
-
-    /**
-     * Update the Antigravity access token and expiry after OAuth refresh.
-     */
-    fun updateAntigravityToken(accountId: String, newToken: String, newExpiry: String) {
-        val accounts = getAllAccounts().toMutableList()
-        val idx = accounts.indexOfFirst { it.id == accountId }
-        if (idx >= 0) {
-            accounts[idx] = accounts[idx].copy(
-                agyAccessToken = newToken,
-                agyAccessTokenExpiry = newExpiry
-            )
             saveAccounts(accounts)
         }
     }

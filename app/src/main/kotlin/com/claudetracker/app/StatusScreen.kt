@@ -7,11 +7,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -54,13 +61,16 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -170,28 +180,38 @@ fun StatusScreen(
                     )
                 }
                 is StatusState.Loaded -> {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    var isVisible by remember { mutableStateOf(false) }
+                    LaunchedEffect(state) {
+                        isVisible = true
+                    }
+                    
+                    val grouped = state.accounts.groupBy { it.account.platform }
+                    val platformOrder = listOf(Platform.CLAUDE, Platform.CODEX)
+                    val expandedStates = remember { mutableStateMapOf<Platform, Boolean>() }
 
-                        // Group accounts by platform and show expandable sections
-                        val grouped = state.accounts.groupBy { it.account.platform }
-                        val platformOrder = listOf(Platform.CLAUDE, Platform.CODEX, Platform.ANTIGRAVITY)
+                    AnimatedVisibility(
+                        visible = isVisible,
+                        enter = fadeIn(tween(600)) + slideInVertically(tween(600), initialOffsetY = { 100 })
+                    ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item { Spacer(modifier = Modifier.height(8.dp)) }
 
                         for (platform in platformOrder) {
                             val accounts = grouped[platform] ?: continue
-                            item(key = "header_${platform.name}") {
-                                PlatformSection(
-                                    platform = platform,
-                                    accounts = accounts,
-                                    onRemove = { viewModel.removeAccount(it) },
-                                    onRelogin = onAddAccount
-                                )
-                            }
+                            val isExpanded = expandedStates[platform] ?: true
+                            platformSection(
+                                platform = platform,
+                                accounts = accounts,
+                                expanded = isExpanded,
+                                onToggleExpand = { expandedStates[platform] = !isExpanded },
+                                onRemove = { viewModel.removeAccount(it) },
+                                onRelogin = onAddAccount
+                            )
                         }
 
                         item {
@@ -219,6 +239,7 @@ fun StatusScreen(
                         }
                         item { Spacer(modifier = Modifier.height(72.dp)) }
                     }
+                    } // End AnimatedVisibility
                 }
             }
         }
@@ -229,87 +250,102 @@ fun StatusScreen(
 // ── Expandable Platform Section ──────────────────────
 // ═══════════════════════════════════════════════════════
 
-@Composable
-private fun PlatformSection(
+private fun LazyListScope.platformSection(
     platform: Platform,
     accounts: List<AccountUsage>,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
     onRemove: (String) -> Unit,
     onRelogin: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(true) }
     val iconRes = when (platform) {
         Platform.CLAUDE -> R.drawable.ic_claude
         Platform.CODEX -> R.drawable.ic_codex
-        Platform.ANTIGRAVITY -> R.drawable.ic_antigravity
     }
 
-    Column {
-        // Platform header — clickable to expand/collapse
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded },
-            shape = MaterialTheme.shapes.medium,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            )
-        ) {
-            Row(
+    item(key = "header_${platform.name}") {
+        val interactionSource = remember { MutableInteractionSource() }
+        val isPressed by interactionSource.collectIsPressedAsState()
+        val scale by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isPressed) 0.97f else 1f,
+            animationSpec = tween(150),
+            label = "header_scale"
+        )
+        
+        Column(modifier = Modifier.animateItem()) {
+            // Platform header — clickable to expand/collapse
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                androidx.compose.foundation.Image(
-                    painter = painterResource(id = iconRes),
-                    contentDescription = platform.displayName,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(6.dp)),
-                    contentScale = ContentScale.Crop
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = platform.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = "${accounts.size} account${if (accounts.size != 1) "s" else ""}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        // Account cards — shown when expanded
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(),
-            exit = shrinkVertically()
-        ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 8.dp)
-            ) {
-                for (accountUsage in accounts) {
-                    SwipeToDismissAccountCard(
-                        accountUsage = accountUsage,
-                        onRemove = { onRemove(accountUsage.account.id) },
-                        onRelogin = onRelogin
+                    .scale(scale)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = androidx.compose.foundation.LocalIndication.current,
+                        onClick = onToggleExpand
+                    ),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                     )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.foundation.Image(
+                            painter = painterResource(id = iconRes),
+                            contentDescription = platform.displayName,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(6.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = platform.displayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "${accounts.size} account${if (accounts.size != 1) "s" else ""}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (expanded) "Collapse" else "Expand",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+
+    if (expanded) {
+        items(
+            items = accounts,
+            key = { "account_${platform.name}_${it.account.id}" }
+        ) { accountUsage ->
+            Box(
+                modifier = Modifier
+                    .animateItem()
+                    .padding(top = 8.dp)
+            ) {
+                SwipeToDismissAccountCard(
+                    accountUsage = accountUsage,
+                    onRemove = { onRemove(accountUsage.account.id) },
+                    onRelogin = onRelogin
+                )
+            }
+        }
+        item(key = "spacer_${platform.name}") {
+            Spacer(modifier = Modifier.height(12.dp).animateItem())
+        }
     }
 }
 
@@ -413,65 +449,25 @@ private fun AccountCard(accountUsage: AccountUsage, onRelogin: () -> Unit = {}) 
                     }
                 }
                 accountUsage.error != null -> {
-                    Text("Error: ${accountUsage.error}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    Text(
+                        "Error: ${accountUsage.error}", 
+                        style = MaterialTheme.typography.bodyMedium, 
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
                 data != null -> {
-                    if (data.hasModelGroups) {
-                        // ── Antigravity: show dual model groups ──
-                        data.geminiSession?.let { gs ->
-                            Text("Gemini Models", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                UsageCard(
-                                    label = "Session (5h)", percent = gs.percentUsed,
-                                    resetTime = formatResetTime(gs.resetsAt),
-                                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
-                                )
-                                UsageCard(
-                                    label = "Weekly", percent = data.geminiWeekly?.percentUsed ?: 0.0,
-                                    resetTime = formatResetTime(data.geminiWeekly?.resetsAt ?: ""),
-                                    color = MaterialTheme.colorScheme.secondary, modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                        data.claudeGptSession?.let { cs ->
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Claude & GPT Models", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                UsageCard(
-                                    label = "Session (5h)", percent = cs.percentUsed,
-                                    resetTime = formatResetTime(cs.resetsAt),
-                                    color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.weight(1f)
-                                )
-                                UsageCard(
-                                    label = "Weekly", percent = data.claudeGptWeekly?.percentUsed ?: 0.0,
-                                    resetTime = formatResetTime(data.claudeGptWeekly?.resetsAt ?: ""),
-                                    color = MaterialTheme.colorScheme.secondary, modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                        // Fallback if neither group found
-                        if (data.geminiSession == null && data.claudeGptSession == null) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                UsageCard("Session (5h)", data.sessionPercentUsed, formatResetTime(data.sessionResetTimestamp), MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                                UsageCard("Weekly", data.weeklyPercentUsed, formatResetTime(data.weeklyResetTimestamp), MaterialTheme.colorScheme.secondary, Modifier.weight(1f))
-                            }
-                        }
-                    } else {
-                        // ── Claude / Codex: standard 2-window display ──
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            UsageCard(
-                                label = "Session (5h)", percent = data.sessionPercentUsed,
-                                resetTime = formatResetTime(data.sessionResetTimestamp),
-                                color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
-                            )
-                            UsageCard(
-                                label = "Weekly", percent = data.weeklyPercentUsed,
-                                resetTime = formatResetTime(data.weeklyResetTimestamp),
-                                color = MaterialTheme.colorScheme.secondary, modifier = Modifier.weight(1f)
-                            )
-                        }
+                    // Standard 2-window display for Claude & Codex
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        UsageCard(
+                            label = "Session (5h)", percent = data.sessionPercentUsed,
+                            resetTime = formatResetTime(data.sessionResetTimestamp),
+                            color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
+                        )
+                        UsageCard(
+                            label = "Weekly", percent = data.weeklyPercentUsed,
+                            resetTime = formatResetTime(data.weeklyResetTimestamp),
+                            color = MaterialTheme.colorScheme.secondary, modifier = Modifier.weight(1f)
+                        )
                     }
                 }
                 else -> {

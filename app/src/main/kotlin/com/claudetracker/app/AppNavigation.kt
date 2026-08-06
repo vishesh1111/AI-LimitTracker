@@ -25,7 +25,7 @@ fun AppNavigation(startDestination: String) {
             )
         }
 
-        // ── Platform picker — choose Claude / Codex / Antigravity ──
+        // ── Platform picker — choose Claude or Codex ──
         composable("platform_picker") {
             PlatformPickerScreen(
                 onPlatformSelected = { platform ->
