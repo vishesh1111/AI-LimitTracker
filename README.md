@@ -11,13 +11,15 @@ their own Claude account independently.
 
 ## Features
 
-- **Multi-Account Support**: Add and monitor multiple Claude.ai accounts simultaneously.
-- **Automated Login Flow**: Smart URL detection automatically captures your session without any manual buttons after logging in.
-- **Usage Tracking**: Monitor your Session (5h) and Weekly usage percentage and reset times.
+- **Multi-Platform Support**: Track usage limits for **Claude.ai**, **Codex (ChatGPT Plus/Pro)**, and **Antigravity** (Gemini Models, Claude & GPT Models).
+- **Multi-Account Support**: Add and monitor multiple accounts across different platforms simultaneously.
+- **Automated Login Flow**: Smart URL and OAuth detection automatically captures your session without any manual buttons after logging in.
+- **Real-Time Usage Tracking**: Monitor your Session (5h) and Weekly usage percentages, along with exact reset timestamps.
+- **Premium UI & Animations**: Beautifully crafted dark and white themes with OLED-friendly high-contrast colors, dynamic stagger animations, and swipe-to-delete interactions.
 - **Premium Home Screen Widget**: A beautiful Glance widget with text-based progress bars, plan name badges, and color-coded status indicators (🟢🟡🔴).
 - **Background Sync**: Runs in the background and sends you a notification exactly when your usage window resets.
 - **Account Management**: Swipe to delete specific accounts or use the secure "Logout All" function with confirmation.
-- **Privacy First**: Secure `EncryptedSharedPreferences` for your cookies. All data stays locally on your device.
+- **Privacy First**: Uses secure `EncryptedSharedPreferences` for your cookies and tokens. All data stays locally on your device.
 
 ---
 ## Quick Start
