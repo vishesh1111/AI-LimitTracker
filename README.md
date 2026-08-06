@@ -1,3 +1,11 @@
+## ScreenShots
+<div style="display: flex; flex-direction: row; gap: 10px;">
+  <img width="30%" alt="Screenshot 1" src="./assets/Screenshot_20260806_185425.png" />
+  <img width="30%" alt="Screenshot 2" src="./assets/Screenshot_20260806_185840.png" />
+  <img width="30%" alt="Screenshot 3" src="./assets/Screenshot_20260806_185858.png" />
+</div>
+
+
 # AI Limit Tracker (formerly Claude Tracker)
 
 A personal-use Android app that tracks your usage limits (session %, weekly %, reset times) across popular AI platforms: **Claude.ai**, **ChatGPT Plus/Pro (Codex)**, and **Google Antigravity**. 
@@ -219,10 +227,3 @@ No `WAKE_LOCK`, no `BOOT_COMPLETED`, no `ACCESS_NETWORK_STATE`, no location, no 
 
 ---
 
-## Screenshots
-
-<div style="display: flex; flex-direction: row; gap: 10px;">
-  <img width="30%" alt="Screenshot 1" src="./assets/Screenshot_20260806_185425.png" />
-  <img width="30%" alt="Screenshot 2" src="./assets/Screenshot_20260806_185840.png" />
-  <img width="30%" alt="Screenshot 3" src="./assets/Screenshot_20260806_185858.png" />
-</div>
