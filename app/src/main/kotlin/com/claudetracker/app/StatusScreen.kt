@@ -360,14 +360,35 @@ private fun SwipeToDismissAccountCard(
     onRemove: () -> Unit,
     onRelogin: () -> Unit = {}
 ) {
+    var showDeleteDialog by remember { mutableStateOf(false) }
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
             if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
-                onRemove()
-                true
+                showDeleteDialog = true
+                false // Don't dismiss yet — wait for confirmation
             } else false
         }
     )
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Remove Account?") },
+            text = { Text("Are you sure you want to remove \"${accountUsage.account.displayName}\"? You'll need to log in again to add it back.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteDialog = false
+                        onRemove()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     SwipeToDismissBox(
         state = dismissState,
@@ -456,18 +477,59 @@ private fun AccountCard(accountUsage: AccountUsage, onRelogin: () -> Unit = {}) 
                     )
                 }
                 data != null -> {
-                    // Standard 2-window display for Claude & Codex
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        UsageCard(
-                            label = "Session (5h)", percent = data.sessionPercentUsed,
-                            resetTime = formatResetTime(data.sessionResetTimestamp),
-                            color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
-                        )
-                        UsageCard(
-                            label = "Weekly", percent = data.weeklyPercentUsed,
-                            resetTime = formatResetTime(data.weeklyResetTimestamp),
-                            color = MaterialTheme.colorScheme.secondary, modifier = Modifier.weight(1f)
-                        )
+                    if (account.platform == Platform.CODEX) {
+                        // Codex: Monthly limit + optional resets info
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            UsageCard(
+                                label = "Monthly", percent = data.sessionPercentUsed,
+                                resetTime = formatResetTime(data.sessionResetTimestamp),
+                                color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (data.resetsAvailable >= 0) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = MaterialTheme.shapes.medium,
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Usage limit resets",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = if (data.resetsAvailable > 0) "${data.resetsAvailable} available" else "No resets available",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (data.resetsAvailable > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Claude: Session + Weekly display
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            UsageCard(
+                                label = "Session (5h)", percent = data.sessionPercentUsed,
+                                resetTime = formatResetTime(data.sessionResetTimestamp),
+                                color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f)
+                            )
+                            UsageCard(
+                                label = "Weekly", percent = data.weeklyPercentUsed,
+                                resetTime = formatResetTime(data.weeklyResetTimestamp),
+                                color = MaterialTheme.colorScheme.secondary, modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
                 else -> {

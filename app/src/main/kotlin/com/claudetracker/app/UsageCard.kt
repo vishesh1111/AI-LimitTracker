@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+import androidx.compose.runtime.saveable.rememberSaveable
+
 @Composable
 fun UsageCard(
     label: String,
@@ -36,7 +38,7 @@ fun UsageCard(
     color: Color,
     modifier: Modifier = Modifier
 ) {
-    var animationPlayed by remember { mutableStateOf(false) }
+    var animationPlayed by rememberSaveable { mutableStateOf(false) }
     
     LaunchedEffect(key1 = true) {
         animationPlayed = true

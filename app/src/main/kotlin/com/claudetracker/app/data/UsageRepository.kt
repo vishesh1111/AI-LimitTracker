@@ -55,20 +55,31 @@ class UsageRepository(
     }
 
     /**
-     * Codex: first refresh the JWT using the session cookie, then fetch usage.
+     * Codex: try the stored JWT first; if it fails with auth error, refresh via session cookie.
      */
     private suspend fun fetchCodexWithTokenRefresh(account: Account): UsageResult {
-        // Step 1: Exchange session cookie for a fresh JWT
+        // Step 1: Try using the stored access token directly
+        val result = apiClient.fetchCodexUsage(account.codexAccessToken)
+        if (result !is UsageResult.AuthExpired) {
+            return result // Success or NetworkError — no token refresh needed
+        }
+
+        // Step 2: Token expired — try refreshing via session cookie
+        if (account.codexSessionCookie.isBlank() || account.codexSessionCookie == "direct_js_auth") {
+            // No valid session cookie to refresh with (JS-based login)
+            return UsageResult.AuthExpired
+        }
+
         val tokenResult = apiClient.fetchCodexAccessToken(account.codexSessionCookie)
-        val accessToken = tokenResult.getOrElse {
+        val freshToken = tokenResult.getOrElse {
             return UsageResult.AuthExpired
         }
 
         // Update the stored token
-        secureStorage.updateCodexAccessToken(account.id, accessToken)
+        secureStorage.updateCodexAccessToken(account.id, freshToken)
 
-        // Step 2: Fetch usage with the JWT
-        return apiClient.fetchCodexUsage(accessToken)
+        // Step 3: Retry with the fresh token
+        return apiClient.fetchCodexUsage(freshToken)
     }
 
     // ── Legacy single-account fetch (for backward compat) ──

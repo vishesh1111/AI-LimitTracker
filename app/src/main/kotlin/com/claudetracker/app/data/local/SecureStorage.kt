@@ -28,7 +28,7 @@ class SecureStorage(context: Context) {
         // Codex accounts have generated IDs, so keep one current account.
         val existingIndex = when (account.platform) {
             Platform.CODEX -> accounts.indexOfFirst {
-                it.platform == Platform.CODEX
+                it.platform == Platform.CODEX && it.displayName == account.displayName
             }
             else -> accounts.indexOfFirst { it.id == account.id }
         }

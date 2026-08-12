@@ -107,10 +107,19 @@ fun LoginScreen(
     viewModel: LoginViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var cookiesReady by remember { mutableStateOf(!clearAllCookies) }
 
     LaunchedEffect(platform) {
+        viewModel.resetState()
         viewModel.targetPlatform = platform
-        viewModel.clearWebViewCookies(clearAll = clearAllCookies)
+        if (clearAllCookies) {
+            val cm = CookieManager.getInstance()
+            cm.removeAllCookies(null)
+            cm.flush()
+            kotlinx.coroutines.delay(400) // Ensure cookies are fully purged
+            cookiesReady = true
+        }
+        viewModel.clearWebViewCookies(clearAll = false) // Clear Claude-specific cookie
         if (platform == Platform.CLAUDE && !clearAllCookies) {
             val cm = CookieManager.getInstance()
             cm.setCookie("https://claude.ai", "OptanonAlertBoxClosed=2024-01-01; Path=/; Domain=.claude.ai")
@@ -131,6 +140,12 @@ fun LoginScreen(
                 .padding(paddingValues)
         ) {
             when {
+                // Show loading while cookies are being cleared
+                !cookiesReady -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                }
                 // ── WebView login for Claude and Codex ──
                 uiState is LoginState.WaitingForLogin && (platform == Platform.CLAUDE || platform == Platform.CODEX) -> {
                     val loginUrl = when (platform) {

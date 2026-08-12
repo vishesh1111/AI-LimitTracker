@@ -249,7 +249,39 @@ class LoginViewModel : ViewModel() {
 
     private suspend fun captureCodexCookie(webView: android.webkit.WebView? = null) {
         try {
-            // Try getting cookies from multiple possible domains
+            // Strategy 1 (preferred): Use JS to fetch session endpoint directly from WebView context.
+            // This runs with ALL cookies (including CSRF/security cookies) so it's more reliable
+            // than extracting just the session token and replaying it via OkHttp.
+            if (webView != null) {
+                Log.d("LoginViewModel", "Using JS fetch to get access token directly...")
+                val js = """
+                    (function() {
+                        fetch('/api/auth/session', { credentials: 'include' })
+                            .then(r => r.json())
+                            .then(data => {
+                                if (data.accessToken) {
+                                    window.AndroidOrg.onResult(200, JSON.stringify(data));
+                                } else {
+                                    window.AndroidOrg.onResult(0, JSON.stringify({error: 'no accessToken'}));
+                                }
+                            })
+                            .catch(e => window.AndroidOrg.onResult(0, JSON.stringify({error: e.toString()})));
+                    })();
+                """.trimIndent()
+
+                try {
+                    webView.addJavascriptInterface(CodexJsInterface(this), "AndroidOrg")
+                } catch (_: Exception) { /* may already exist */ }
+
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    webView.evaluateJavascript(js) { /* no-op */ }
+                }
+                // The JS callback (onCodexSessionJson) will handle saving the account
+                return
+            }
+
+            // Strategy 2 (fallback): Extract session cookie from CookieManager and exchange via OkHttp
+            Log.d("LoginViewModel", "WebView unavailable, falling back to cookie extraction...")
             val cookieDomains = listOf(
                 "https://chatgpt.com",
                 "https://chat.openai.com",
@@ -268,12 +300,12 @@ class LoginViewModel : ViewModel() {
 
             val cookieParts = allCookies.split(";").map { it.trim() }
 
-            // Strategy 1: Look for the single un-chunked token
+            // Look for the single un-chunked token
             var sessionCookie = cookieParts
                 .find { it.startsWith("${Config.CODEX_SESSION_COOKIE_NAME}=") }
                 ?.substringAfter("=") ?: ""
 
-            // Strategy 2: Reassemble chunked tokens (.0, .1, .2, ...)
+            // Reassemble chunked tokens (.0, .1, .2, ...)
             if (sessionCookie.isBlank()) {
                 val chunks = cookieParts
                     .filter { it.startsWith("${Config.CODEX_SESSION_COOKIE_NAME}.") }
@@ -290,39 +322,7 @@ class LoginViewModel : ViewModel() {
                 }
             }
 
-            // Strategy 3: Use JS to fetch session endpoint directly from WebView context
-            if (sessionCookie.isBlank() && webView != null) {
-                Log.d("LoginViewModel", "Cookie extraction failed, trying JS fetch fallback...")
-                // Inject JS to call the session API from the WebView's cookie context
-                val js = """
-                    (function() {
-                        fetch('/api/auth/session', { credentials: 'include' })
-                            .then(r => r.json())
-                            .then(data => {
-                                if (data.accessToken) {
-                                    window.AndroidOrg.onResult(200, JSON.stringify(data));
-                                } else {
-                                    window.AndroidOrg.onResult(0, JSON.stringify({error: 'no accessToken'}));
-                                }
-                            })
-                            .catch(e => window.AndroidOrg.onResult(0, JSON.stringify({error: e.toString()})));
-                    })();
-                """.trimIndent()
-
-                // Add JS interface if not already present for Codex
-                try {
-                    webView.addJavascriptInterface(CodexJsInterface(this), "AndroidOrg")
-                } catch (_: Exception) { /* may already exist */ }
-
-                withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    webView.evaluateJavascript(js) { /* no-op */ }
-                }
-                // The JS callback will handle the rest
-                return
-            }
-
             if (sessionCookie.isBlank()) {
-                // Retry with increasing delay
                 retryCount++
                 if (retryCount < MAX_RETRIES) {
                     Log.d("LoginViewModel", "No cookie found, retrying (${retryCount}/$MAX_RETRIES)...")
@@ -341,7 +341,7 @@ class LoginViewModel : ViewModel() {
                 return
             }
 
-            // Got the cookie — exchange for access token
+            // Got the cookie — exchange for access token via OkHttp
             val apiClient = ClaudeTrackerApp.appInstance.usageApiClient
             val tokenResult = apiClient.fetchCodexAccessToken(sessionCookie)
             val accessToken = tokenResult.getOrElse {
@@ -387,16 +387,60 @@ class LoginViewModel : ViewModel() {
     }
 
     private fun saveCodexAccount(sessionCookie: String, accessToken: String) {
+        // Extract user email from the JWT access token (payload is base64-encoded JSON)
+        val displayName = try {
+            val parts = accessToken.split(".")
+            if (parts.size >= 2) {
+                val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP))
+                val payloadJson = JSONObject(payload)
+                // The profile claim is a nested JSON object with email, name, etc.
+                val profile = payloadJson.optJSONObject("https://api.openai.com/profile")
+                val email = profile?.optString("email", "") ?: ""
+                val name = profile?.optString("name", "") ?: ""
+                email.ifBlank {
+                    name.ifBlank {
+                        payloadJson.optString("email", "").ifBlank {
+                            payloadJson.optString("sub", "").ifBlank {
+                                "ChatGPT Account"
+                            }
+                        }
+                    }
+                }
+            } else "ChatGPT Account"
+        } catch (e: Exception) {
+            Log.w("LoginViewModel", "Could not parse JWT for display name", e)
+            "ChatGPT Account"
+        }
+
+        // Extract plan name from JWT if available
+        val planName = try {
+            val parts = accessToken.split(".")
+            if (parts.size >= 2) {
+                val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP))
+                val payloadJson = JSONObject(payload)
+                // The auth claim can be a JSON object or array — stringify it for keyword matching
+                val authObj = payloadJson.opt("https://api.openai.com/auth")
+                val authStr = authObj?.toString() ?: ""
+                when {
+                    authStr.contains("chatgpt-paid", ignoreCase = true) -> "Plus"
+                    authStr.contains("chatgpt-freeaccount", ignoreCase = true) -> "Free"
+                    authStr.isNotBlank() -> "Plus"
+                    else -> "Unknown"
+                }
+            } else "Unknown"
+        } catch (_: Exception) { "Unknown" }
+
         val accountId = "codex_${System.currentTimeMillis().toString(36)}"
         val account = Account(
             id = accountId,
             platform = Platform.CODEX,
-            displayName = "ChatGPT Account",
-            planName = "Plus",
+            displayName = displayName,
+            planName = planName,
             codexSessionCookie = sessionCookie,
             codexAccessToken = accessToken
         )
 
+        Log.d("LoginViewModel", "Saving Codex account: displayName=$displayName planName=$planName")
         ClaudeTrackerApp.appInstance.secureStorage.addAccount(account)
         hasCaptured = true
         _uiState.value = LoginState.Success

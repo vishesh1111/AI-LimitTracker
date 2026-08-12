@@ -20,7 +20,8 @@ data class UsageData(
     val weeklyPercentUsed: Double,
     val sessionResetTimestamp: String,
     val weeklyResetTimestamp: String,
-    val planName: String
+    val planName: String,
+    val resetsAvailable: Int = -1  // -1 = not applicable, 0+ = actual count
 ) {
     companion object {
         /**
@@ -77,32 +78,33 @@ data class UsageData(
             val planType = json.optString("plan_type", "Plus")
             val rateLimit = json.optJSONObject("rate_limit")
 
+            // primary_window is the monthly limit for Go/Plus plans
             val primary = rateLimit?.optJSONObject("primary_window")
             val secondary = rateLimit?.optJSONObject("secondary_window")
 
-            val sessionPercent = primary?.optDouble("used_percent", 0.0) ?: 0.0
-            val sessionResetSecs = primary?.optLong("reset_after_seconds", 0L) ?: 0L
-            val weeklyPercent = secondary?.optDouble("used_percent", 0.0) ?: 0.0
-            val weeklyResetSecs = secondary?.optLong("reset_after_seconds", 0L) ?: 0L
+            val monthlyPercent = primary?.optDouble("used_percent", 0.0) ?: 0.0
+            val monthlyResetSecs = primary?.optLong("reset_after_seconds", 0L) ?: 0L
+            val secondaryPercent = secondary?.optDouble("used_percent", 0.0) ?: 0.0
+            val secondaryResetSecs = secondary?.optLong("reset_after_seconds", 0L) ?: 0L
+
+            // Parse resets available ("Usage limit resets")
+            val resetsAvailable = json.optInt("resets_available", -1)
 
             val now = System.currentTimeMillis()
-            // Round to the nearest minute to prevent jitter — each refresh recalculates
-            // "now + remaining_seconds" which would give a different result every time.
-            // Rounding means two refreshes 15 min apart both saying "resets in 2h"
-            // produce the same timestamp, preventing spurious notifications.
-            val sessionResetMs = now + sessionResetSecs * 1000
-            val weeklyResetMs = now + weeklyResetSecs * 1000
-            val roundedSessionMs = (sessionResetMs / 60_000L) * 60_000L
-            val roundedWeeklyMs = (weeklyResetMs / 60_000L) * 60_000L
-            val sessionResetIso = java.time.Instant.ofEpochMilli(roundedSessionMs).toString()
-            val weeklyResetIso = java.time.Instant.ofEpochMilli(roundedWeeklyMs).toString()
+            val monthlyResetMs = now + monthlyResetSecs * 1000
+            val secondaryResetMs = now + secondaryResetSecs * 1000
+            val roundedMonthlyMs = (monthlyResetMs / 60_000L) * 60_000L
+            val roundedSecondaryMs = (secondaryResetMs / 60_000L) * 60_000L
+            val monthlyResetIso = java.time.Instant.ofEpochMilli(roundedMonthlyMs).toString()
+            val secondaryResetIso = java.time.Instant.ofEpochMilli(roundedSecondaryMs).toString()
 
             return UsageData(
-                sessionPercentUsed = sessionPercent,
-                weeklyPercentUsed = weeklyPercent,
-                sessionResetTimestamp = sessionResetIso,
-                weeklyResetTimestamp = weeklyResetIso,
-                planName = planType
+                sessionPercentUsed = monthlyPercent,
+                weeklyPercentUsed = secondaryPercent,
+                sessionResetTimestamp = monthlyResetIso,
+                weeklyResetTimestamp = secondaryResetIso,
+                planName = planType,
+                resetsAvailable = resetsAvailable
             )
         }
 
